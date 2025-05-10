@@ -1,79 +1,82 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-
-# In[12]:
-
-
+import streamlit as st
 import pandas as pd
+import tempfile
 import os
 
-# === MOSTRAR DIRECTORIO ACTUAL ===
-print(f"📁 Directorio actual: {os.getcwd()}")
+# --- Configuración de la interfaz ---
+st.set_page_config(page_title="Top 30 Stock", layout="wide")
+st.title("📊 Análisis de Top 30 productos y stock por tienda")
 
-# === PEDIR NOMBRE DEL ARCHIVO ===
-archivo = input("📂 Introduce el nombre o ruta completa del archivo (ej: PRUEBA TOP.txt): ").strip()
-if not os.path.isfile(archivo):
-    print(f"❌ El archivo '{archivo}' no existe.")
-    exit()
-
-# === CONFIGURACIÓN ===
-separador = "\t"
-decimal = ","
-archivo_global = "top_30_global.csv"
-archivo_por_tienda_xlsx = "top_30_por_tienda.xlsx"
-
-# === TIENDAS PERMITIDAS ===
-tiendas_validas = {
+# --- Tiendas válidas ---
+TIENDAS_VALIDAS = {
     "01", "02", "03", "04", "05", "06", "07", "09", "11", "12", "13", "15", "16", "17",
     "18", "19", "21", "22", "24", "25", "26", "27", "28", "29", "31", "33", "35", "36",
     "37", "38", "39", "41", "42"
 }
 
-# === CARGAR DATOS ===
-df = pd.read_csv(archivo, sep=separador, encoding="utf-8", decimal=decimal)
+# --- Subida del archivo ---
+archivo = st.file_uploader("📂 Sube el archivo TXT de stock y ventas", type=["txt"])
 
-# === ELIMINAR FILAS CON "online hombre" EN CUALQUIER COLUMNA ===
-df = df[~df.apply(lambda fila: fila.astype(str).str.lower().str.contains("online hombre").any(), axis=1)]
+if archivo:
+    try:
+        # --- Lectura del archivo ---
+        df = pd.read_csv(archivo, sep="\t", encoding="utf-8", decimal=",")
 
-# === IDENTIFICAR COLUMNAS V y S SEGÚN TIENDAS PERMITIDAS ===
-columnas_ventas = [col for col in df.columns if col.startswith("V") and col[1:] in tiendas_validas]
-columnas_stock = [col for col in df.columns if col.startswith("S") and col[1:] in tiendas_validas]
+        # --- Limpieza de 'online hombre' ---
+        df = df[~df.apply(lambda row: row.astype(str).str.lower().str.contains("online hombre").any(), axis=1)]
 
-# === CONVERTIR A NÚMEROS ===
-df[columnas_ventas + columnas_stock] = df[columnas_ventas + columnas_stock].apply(pd.to_numeric, errors='coerce')
+        # --- Detección de columnas ---
+        columnas_ventas = [col for col in df.columns if col.startswith("V") and col[1:] in TIENDAS_VALIDAS]
+        columnas_stock = [col for col in df.columns if col.startswith("S") and col[1:] in TIENDAS_VALIDAS]
 
-# === CALCULAR TOTALES Y TOP 30 ===
-df["Total_Ventas"] = df[columnas_ventas].sum(axis=1, skipna=True)
-df["Total_Stock"] = df[columnas_stock].sum(axis=1, skipna=True)
-top_30 = df.nlargest(30, "Total_Ventas").copy()
+        # --- Conversión a numérico ---
+        df[columnas_ventas + columnas_stock] = df[columnas_ventas + columnas_stock].apply(pd.to_numeric, errors='coerce')
 
-# === ARCHIVO 1: GLOBAL ===
-top_30_global = top_30[["CODIGO", "ARTICULO", "DESCRIPCION", "Total_Ventas", "Total_Stock"]]
-top_30_global.to_csv(archivo_global, index=False, encoding="utf-8-sig", sep=";")
+        # --- Cálculo de totales ---
+        df["Total_Ventas"] = df[columnas_ventas].sum(axis=1, skipna=True)
+        df["Total_Stock"] = df[columnas_stock].sum(axis=1, skipna=True)
+        top_30 = df.nlargest(30, "Total_Ventas").copy()
 
-# === ARCHIVO 2: EXCEL CON HOJA "RESUMEN" PRIMERO ===
-resumen_data = []
+        # --- Mostrar en pantalla el resumen global ---
+        resumen_global = top_30[["CODIGO", "ARTICULO", "DESCRIPCION", "Total_Ventas", "Total_Stock"]]
+        st.subheader("🔝 Top 30 productos por ventas")
+        st.dataframe(resumen_global)
 
-with pd.ExcelWriter(archivo_por_tienda_xlsx, engine="xlsxwriter") as writer:
-    # === PRIMERO: hoja "RESUMEN"
-    for tienda in columnas_stock:
-        productos_sin_stock = top_30[top_30[tienda] <= 0]
-        resumen_data.append({"Tienda": tienda, "Productos_sin_stock": len(productos_sin_stock)})
+        # --- Crear archivo CSV global ---
+        tmpdir = tempfile.mkdtemp()
+        csv_path = os.path.join(tmpdir, "top_30_global.csv")
+        resumen_global.to_csv(csv_path, index=False, encoding="utf-8-sig", sep=";")
 
-    resumen_df = pd.DataFrame(resumen_data)
-    resumen_df.to_excel(writer, sheet_name="RESUMEN", index=False)
+        # --- Crear Excel con hojas por tienda ---
+        resumen_data = []
+        hojas_por_tienda = {}
 
-    # === DESPUÉS: hojas por tienda si hay productos sin stock
-    for tienda in columnas_stock:
-        productos_sin_stock = top_30[top_30[tienda] <= 0]
-        if not productos_sin_stock.empty:
-            columnas_a_mostrar = ["CODIGO", "ARTICULO", "DESCRIPCION", "Total_Ventas", tienda]
-            productos_sin_stock[columnas_a_mostrar].to_excel(writer, sheet_name=tienda, index=False)
+        for tienda in columnas_stock:
+            sin_stock = top_30[top_30[tienda] <= 0]
+            resumen_data.append({
+                "Tienda": tienda,
+                "Productos_sin_stock": len(sin_stock),
+                "Porcentaje": f"{len(sin_stock)/30:.0%}"
+            })
+            if not sin_stock.empty:
+                columnas_a_mostrar = ["CODIGO", "ARTICULO", "DESCRIPCION", "Total_Ventas", tienda]
+                hojas_por_tienda[tienda] = sin_stock[columnas_a_mostrar]
 
-# === CONFIRMACIÓN ===
-print(f"\n✅ Archivos generados correctamente:")
-print(f"   📄 {archivo_global}")
-print(f"   📄 {archivo_por_tienda_xlsx}")
-print("\n📊 La hoja 'RESUMEN' será la primera visible al abrir el archivo Excel.")
+        resumen_df = pd.DataFrame(resumen_data)
+        excel_path = os.path.join(tmpdir, "top_30_por_tienda.xlsx")
+        with pd.ExcelWriter(excel_path, engine="xlsxwriter") as writer:
+            resumen_df.to_excel(writer, sheet_name="RESUMEN", index=False)
+            for tienda, df_tienda in hojas_por_tienda.items():
+                df_tienda.to_excel(writer, sheet_name=tienda, index=False)
 
+        # --- Botones para descargar archivos ---
+        st.subheader("📥 Descarga de archivos")
+
+        with open(csv_path, "rb") as f:
+            st.download_button("⬇️ Descargar Top 30 Global (.csv)", f, file_name="top_30_global.csv")
+
+        with open(excel_path, "rb") as f:
+            st.download_button("⬇️ Descargar Excel por Tienda (.xlsx)", f, file_name="top_30_por_tienda.xlsx")
+
+    except Exception as e:
+        st.error(f"❌ Error procesando el archivo: {e}")
