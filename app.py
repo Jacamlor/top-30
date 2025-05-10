@@ -1,11 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[9]:
-
-
-pip install XlsxWriter
-
 
 # In[12]:
 
