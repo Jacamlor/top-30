@@ -61,7 +61,6 @@ if archivo:
                     if tienda in df.columns:
                         top = df[["CODIGO", "ARTICULO", "DESCRIPCION", tienda]].copy()
                         top = top.rename(columns={tienda: "Ventas"}).sort_values(by="Ventas", ascending=False).head(30)
-                        nombre_hoja = f"{zona}_{tienda}"[:31]
                         top.to_excel(writer, sheet_name=nombre_hoja, index=False)
                         hojas_escritas += 1
 
