@@ -3,84 +3,80 @@ import pandas as pd
 import tempfile
 import os
 
-st.set_page_config(page_title="Top 30 Ventas por Tienda y Zona", layout="wide")
-st.title("🏪 Top 30 de ventas por tienda, por zona y con stock bajo")
+# --- Configuración de la interfaz ---
+st.set_page_config(page_title="Top 30 Stock", layout="wide")
+st.title("📊 Análisis de Top 30 productos y stock por tienda")
 
-ZONAS = {
-    "Zona Alex":   ["V04", "V06", "V09", "V11", "V12", "V13", "V26", "V27", "V28", "V31", "V35"],
-    "Zona Alberto": ["V37"],
-    "Zona Leticia": ["V01", "V02", "V07", "V15", "V16", "V17", "V24", "V29", "V38"],
-    "Zona Roberto": ["V03", "V05", "V21", "V22", "V25", "V33", "V36", "V39", "V41", "V42"]
+# --- Tiendas válidas ---
+TIENDAS_VALIDAS = {
+    "01", "02", "03", "04", "05", "06", "07", "09", "11", "12", "13", "15", "16", "17",
+    "18", "19", "21", "22", "24", "25", "26", "27", "28", "29", "31", "33", "35", "36",
+    "37", "38", "39", "41", "42"
 }
 
+# --- Subida del archivo ---
 archivo = st.file_uploader("📂 Sube el archivo TXT de stock y ventas", type=["txt"])
 
 if archivo:
     try:
+        # --- Lectura del archivo ---
         df = pd.read_csv(archivo, sep="\t", encoding="utf-8", decimal=",")
-        columnas_ventas = [col for col in df.columns if col.startswith("V")]
-        columnas_stock = [col for col in df.columns if col.startswith("S")]
-        df[columnas_ventas + columnas_stock] = df[columnas_ventas + columnas_stock].apply(pd.to_numeric, errors="coerce")
 
+        # --- Limpieza de 'online hombre' ---
+        df = df[~df.apply(lambda row: row.astype(str).str.lower().str.contains("online hombre").any(), axis=1)]
+
+        # --- Detección de columnas ---
+        columnas_ventas = [col for col in df.columns if col.startswith("V") and col[1:] in TIENDAS_VALIDAS]
+        columnas_stock = [col for col in df.columns if col.startswith("S") and col[1:] in TIENDAS_VALIDAS]
+
+        # --- Conversión a numérico ---
+        df[columnas_ventas + columnas_stock] = df[columnas_ventas + columnas_stock].apply(pd.to_numeric, errors='coerce')
+
+        # --- Cálculo de totales ---
+        df["Total_Ventas"] = df[columnas_ventas].sum(axis=1, skipna=True)
+        df["Total_Stock"] = df[columnas_stock].sum(axis=1, skipna=True)
+        top_30 = df.nlargest(30, "Total_Ventas").copy()
+
+        # --- Mostrar en pantalla el resumen global ---
+        resumen_global = top_30[["CODIGO", "ARTICULO", "DESCRIPCION", "Total_Ventas", "Total_Stock"]]
+        st.subheader("🔝 Top 30 productos por ventas")
+        st.dataframe(resumen_global)
+
+        # --- Crear archivo CSV global ---
         tmpdir = tempfile.mkdtemp()
+        csv_path = os.path.join(tmpdir, "top_30_global.csv")
+        resumen_global.to_csv(csv_path, index=False, encoding="utf-8-sig", sep=";")
 
-        # === 1. Excel por tienda ===
-        st.subheader("📁 Excel: Top 30 por tienda")
-
-        path_tienda = os.path.join(tmpdir, "top_30_por_tienda.xlsx")
-        with pd.ExcelWriter(path_tienda, engine="xlsxwriter") as writer:
-            for tienda in columnas_ventas:
-                top = df[["CODIGO", "ARTICULO", "DESCRIPCION", tienda]].copy()
-                top = top.rename(columns={tienda: "Ventas"}).sort_values(by="Ventas", ascending=False).head(30)
-                top.to_excel(writer, sheet_name=tienda[:31], index=False)
-
-        with open(path_tienda, "rb") as f:
-            st.download_button("⬇️ Descargar Top 30 por tienda", f, file_name="top_30_por_tienda.xlsx")
-
-        # === 2. Excel por zona ===
-        st.subheader("📘 Excel: Top 30 por zona")
-
-        path_zona = os.path.join(tmpdir, "top_30_por_zona.xlsx")
-        with pd.ExcelWriter(path_zona, engine="xlsxwriter") as writer:
-            for zona, tiendas in ZONAS.items():
-                tiendas_validas = [t for t in tiendas if t in df.columns]
-                if not tiendas_validas:
-                    continue
-                df_zona = df.copy()
-                df_zona["Ventas_Totales"] = df_zona[tiendas_validas].sum(axis=1)
-                top_zona = df_zona[["CODIGO", "ARTICULO", "DESCRIPCION", "Ventas_Totales"]].sort_values(by="Ventas_Totales", ascending=False).head(30)
-                top_zona.to_excel(writer, sheet_name=zona[:31], index=False)
-
-        with open(path_zona, "rb") as f:
-            st.download_button("⬇️ Descargar Top 30 por zona", f, file_name="top_30_por_zona.xlsx")
-
-        # === 3. Excel por tienda - productos del top 30 con stock ≤ 0 ===
-        st.subheader("🧾 Excel: Productos del Top 30 con stock ≤ 0 por tienda")
-
-        path_stock_bajo = os.path.join(tmpdir, "top_30_stock_bajo_por_tienda.xlsx")
+        # --- Crear Excel con hojas por tienda ---
         resumen_data = []
+        hojas_por_tienda = {}
 
-        with pd.ExcelWriter(path_stock_bajo, engine="xlsxwriter") as writer:
-            for tienda in columnas_ventas:
-                col_stock = "S" + tienda[1:]  # Vxx -> Sxx
-                if col_stock in df.columns:
-                    top = df[["CODIGO", "ARTICULO", "DESCRIPCION", tienda, col_stock]].copy()
-                    top = top.rename(columns={tienda: "Ventas", col_stock: "Stock"})
-                    top_30 = top.sort_values(by="Ventas", ascending=False).head(30)
-                    sin_stock = top_30[top_30["Stock"] <= 0]
-                    if not sin_stock.empty:
-                        sin_stock.to_excel(writer, sheet_name=tienda[:31], index=False)
-                    resumen_data.append({
-                        "Tienda": tienda,
-                        "Productos con stock ≤ 0": len(sin_stock)
-                    })
+        for tienda in columnas_stock:
+            sin_stock = top_30[top_30[tienda] <= 0]
+            resumen_data.append({
+                "Tienda": tienda,
+                "Productos_sin_stock": len(sin_stock),
+                "Porcentaje": f"{len(sin_stock)/30:.0%}"
+            })
+            if not sin_stock.empty:
+                columnas_a_mostrar = ["CODIGO", "ARTICULO", "DESCRIPCION", "Total_Ventas", tienda]
+                hojas_por_tienda[tienda] = sin_stock[columnas_a_mostrar]
 
-            # Crear hoja resumen
-            resumen_df = pd.DataFrame(resumen_data)
+        resumen_df = pd.DataFrame(resumen_data)
+        excel_path = os.path.join(tmpdir, "top_30_por_tienda.xlsx")
+        with pd.ExcelWriter(excel_path, engine="xlsxwriter") as writer:
             resumen_df.to_excel(writer, sheet_name="RESUMEN", index=False)
+            for tienda, df_tienda in hojas_por_tienda.items():
+                df_tienda.to_excel(writer, sheet_name=tienda, index=False)
 
-        with open(path_stock_bajo, "rb") as f:
-            st.download_button("⬇️ Descargar productos sin stock del Top 30", f, file_name="top_30_stock_bajo_por_tienda.xlsx")
+        # --- Botones para descargar archivos ---
+        st.subheader("📥 Descarga de archivos")
+
+        with open(csv_path, "rb") as f:
+            st.download_button("⬇️ Descargar Top 30 Global (.csv)", f, file_name="top_30_global.csv")
+
+        with open(excel_path, "rb") as f:
+            st.download_button("⬇️ Descargar Excel por Tienda (.xlsx)", f, file_name="top_30_por_tienda.xlsx")
 
     except Exception as e:
         st.error(f"❌ Error procesando el archivo: {e}")
