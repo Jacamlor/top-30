@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import tempfile
@@ -24,16 +23,20 @@ if archivo:
 
         tmpdir = tempfile.mkdtemp()
 
+        # === 1. Excel por tienda individual ===
+        st.subheader("📁 Excel: Top 30 por tienda")
         path_tienda = os.path.join(tmpdir, "top_30_por_tienda.xlsx")
         with pd.ExcelWriter(path_tienda, engine="xlsxwriter") as writer:
             for tienda in columnas_ventas:
                 top = df[["CODIGO", "ARTICULO", "DESCRIPCION", tienda]].copy()
                 top = top.rename(columns={tienda: "Ventas"}).sort_values(by="Ventas", ascending=False).head(30)
-                top.to_excel(writer, sheet_name=tienda, index=False)
+                top.to_excel(writer, sheet_name=tienda[:31], index=False)
 
         with open(path_tienda, "rb") as f:
             st.download_button("⬇️ Descargar Top 30 por tienda", f, file_name="top_30_por_tienda.xlsx")
 
+        # === 2. Excel con top 30 global por zona ===
+        st.subheader("📘 Excel: Top 30 por zona")
         path_zona = os.path.join(tmpdir, "top_30_por_zona.xlsx")
         with pd.ExcelWriter(path_zona, engine="xlsxwriter") as writer:
             for zona, tiendas in ZONAS.items():
@@ -43,24 +46,30 @@ if archivo:
                 df_zona = df.copy()
                 df_zona["Ventas_Totales"] = df_zona[tiendas_validas].sum(axis=1)
                 top_zona = df_zona[["CODIGO", "ARTICULO", "DESCRIPCION", "Ventas_Totales"]].sort_values(by="Ventas_Totales", ascending=False).head(30)
-                top_zona.to_excel(writer, sheet_name=zona, index=False)
+                top_zona.to_excel(writer, sheet_name=zona[:31], index=False)
 
         with open(path_zona, "rb") as f:
             st.download_button("⬇️ Descargar Top 30 por zona", f, file_name="top_30_por_zona.xlsx")
 
+        # === 3. Excel por tienda dentro de cada zona ===
+        st.subheader("🗂️ Excel: Top 30 por tienda dentro de cada zona")
         path_tienda_en_zona = os.path.join(tmpdir, "top_30_por_tienda_en_zona.xlsx")
+        hojas_escritas = 0
         with pd.ExcelWriter(path_tienda_en_zona, engine="xlsxwriter") as writer:
             for zona, tiendas in ZONAS.items():
                 for tienda in tiendas:
                     if tienda in df.columns:
                         top = df[["CODIGO", "ARTICULO", "DESCRIPCION", tienda]].copy()
                         top = top.rename(columns={tienda: "Ventas"}).sort_values(by="Ventas", ascending=False).head(30)
-                        hoja = f"{zona}_{tienda}"
-                        hoja = hoja[:31]
-                        top.to_excel(writer, sheet_name=hoja, index=False)
+                        nombre_hoja = f"{zona}_{tienda}"[:31]
+                        top.to_excel(writer, sheet_name=nombre_hoja, index=False)
+                        hojas_escritas += 1
 
-        with open(path_tienda_en_zona, "rb") as f:
-            st.download_button("⬇️ Descargar Top 30 por tienda en zona", f, file_name="top_30_por_tienda_en_zona.xlsx")
+        if hojas_escritas > 0:
+            with open(path_tienda_en_zona, "rb") as f:
+                st.download_button("⬇️ Descargar Top 30 por tienda en zona", f, file_name="top_30_por_tienda_en_zona.xlsx")
+        else:
+            st.warning("⚠️ No se generaron hojas para el archivo por tienda en zona.")
 
     except Exception as e:
         st.error(f"❌ Error procesando el archivo: {e}")
