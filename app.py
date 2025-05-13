@@ -51,23 +51,33 @@ if archivo:
         with open(path_zona, "rb") as f:
             st.download_button("⬇️ Descargar Top 30 por zona", f, file_name="top_30_por_zona.xlsx")
 
-        # === 3. Excel por tienda dentro de cada zona ===
-        st.subheader("🗂️ Excel: Top 30 por tienda dentro de cada zona")
-        path_tienda_en_zona = os.path.join(tmpdir, "top_30_por_tienda_en_zona.xlsx")
-        hojas_escritas = 0
-        with pd.ExcelWriter(path_tienda_en_zona, engine="xlsxwriter") as writer:
-            for zona, tiendas in ZONAS.items():
-                for tienda in tiendas:
-                    if tienda in df.columns:
-                        top = df[["CODIGO", "ARTICULO", "DESCRIPCION", tienda]].copy()
-                        top = top.rename(columns={tienda: "Ventas"}).sort_values(by="Ventas", ascending=False).head(30)
-                        nombre_hoja = f"{zona}_{tienda}"[:31]
-                        top.to_excel(writer, sheet_name=nombre_hoja, index=False)
-                        hojas_escritas += 1
+       # === 3. Excel con productos del top 30 con stock ≤ 0 por tienda ===
+st.subheader("🧾 Excel: Productos del Top 30 con stock ≤ 0 por tienda")
 
-        if hojas_escritas > 0:
-            with open(path_tienda_en_zona, "rb") as f:
-                st.download_button("⬇️ Descargar Top 30 por tienda en zona", f, file_name="top_30_por_tienda_en_zona.xlsx")
+path_stock_bajo = os.path.join(tmpdir, "top_30_stock_bajo_por_tienda.xlsx")
+resumen_data = []
+
+with pd.ExcelWriter(path_stock_bajo, engine="xlsxwriter") as writer:
+    for tienda in columnas_ventas:
+        col_stock = "S" + tienda[1:]  # Emparejamos Vxx -> Sxx
+        if col_stock in df.columns:
+            top = df[["CODIGO", "ARTICULO", "DESCRIPCION", tienda, col_stock]].copy()
+            top = top.rename(columns={tienda: "Ventas", col_stock: "Stock"})
+            top_30 = top.sort_values(by="Ventas", ascending=False).head(30)
+            sin_stock = top_30[top_30["Stock"] <= 0]
+            if not sin_stock.empty:
+                sin_stock.to_excel(writer, sheet_name=tienda[:31], index=False)
+            resumen_data.append({
+                "Tienda": tienda,
+                "Productos con stock ≤ 0": len(sin_stock)
+            })
+
+    # Crear hoja resumen
+    resumen_df = pd.DataFrame(resumen_data)
+    resumen_df.to_excel(writer, sheet_name="RESUMEN", index=False)
+
+with open(path_stock_bajo, "rb") as f:
+    st.download_button("⬇️ Descargar productos sin stock del Top 30", f, file_name="top_30_stock_bajo_por_tienda.xlsx")
         else:
             st.warning("⚠️ No se generaron hojas para el archivo por tienda en zona.")
 
