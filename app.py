@@ -73,7 +73,7 @@ if archivo:
         st.subheader("📥 Descarga de archivos")
 
         with open(csv_path, "rb") as f:
-            st.download_button("⬇️ Descargar Top 30 Global (.csv)", f, file_name="top_30_global.csv")
+            st.download_button("⬇️ Descargar Top 10 Global (.csv)", f, file_name="top_30_global.csv")
 
         with open(excel_path, "rb") as f:
             st.download_button("⬇️ Descargar Excel por Tienda (.xlsx)", f, file_name="top_30_por_tienda.xlsx")
